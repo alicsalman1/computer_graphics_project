@@ -1,0 +1,10 @@
+*.o
+viewer/moc_predefs.h
+viewer/moc_openglwindow.cpp
+viewer/moc_glshaderwindow.cpp
+trimesh2/lib/
+trimesh2/Makefile
+Makefile
+.qmake.stash
+viewer/Makefile
+viewer/myViewer
