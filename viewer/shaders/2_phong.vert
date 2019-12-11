@@ -5,6 +5,9 @@ uniform mat4 perspective;
 uniform mat3 normalMatrix;
 uniform bool noColor;
 uniform vec3 lightPosition;
+uniform float Red;
+uniform float Green;
+uniform float Blue;
 
 // World coordinates
 in vec4 vertex;
@@ -19,8 +22,8 @@ out vec4 vertColor;
 out vec4 vertNormal;
 
 void main( void )
-{
-    if (noColor) vertColor = vec4(0.2, 0.6, 0.7, 1.0);
+{   
+    if (noColor) vertColor = vec4(Red, Green, Blue, 1.0);
     else vertColor = color;
     vertNormal.xyz = normalize(normalMatrix * normal.xyz);
     vertNormal.w = 0.0;

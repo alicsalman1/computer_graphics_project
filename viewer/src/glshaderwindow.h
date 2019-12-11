@@ -48,6 +48,9 @@ public slots:
     void updateLightIntensity(int lightSliderValue);
     void updateShininess(int shininessSliderValue);
     void updateEta(int etaSliderValue);
+    void updateRed(int RedSliderValue);
+    void updateGreen(int GreenSliderValue);
+    void updateBlue(int BlueSliderValue);
 
 protected:
     void mousePressEvent(QMouseEvent *e);
@@ -106,6 +109,9 @@ private:
     float shininess;
     float lightDistance;
     float groundDistance;
+    float Red;
+    float Blue;
+    float Green;
 
 
     // OpenGL variables encapsulated by Qt
