@@ -18,5 +18,6 @@ out vec4 fragColor;
 
 void main( void )
 {
-   fragColor = vertColor;
+   // fragColor = vertColor;
+   fragColor = texture(colorTexture, textCoords);
 }
