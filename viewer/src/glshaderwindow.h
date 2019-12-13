@@ -44,6 +44,8 @@ public slots:
     void cookTorranceClicked();
     void blinnPhongClicked();
     void transparentClicked();
+    void ArtisticClicked();
+    void FresnelClicked();
     void opaqueClicked();
     void updateLightIntensity(int lightSliderValue);
     void updateShininess(int shininessSliderValue);
@@ -103,6 +105,7 @@ private:
     GLuint ssbo[4];
     // Parameters controlled by UI
     bool blinnPhong;
+    bool fresnel;
     bool transparent;
     float eta;
     float lightIntensity;

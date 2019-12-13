@@ -27,7 +27,7 @@ glShaderWindow::glShaderWindow(QWindow *parent)
       g_vertices(0), g_normals(0), g_texcoords(0), g_colors(0), g_indices(0),
       gpgpu_vertices(0), gpgpu_normals(0), gpgpu_texcoords(0), gpgpu_colors(0), gpgpu_indices(0),
       environmentMap(0), texture(0), permTexture(0), pixels(0), mouseButton(Qt::NoButton), auxWidget(0),
-      isGPGPU(false), hasComputeShaders(false), blinnPhong(true), transparent(true), eta(1.5), lightIntensity(1.0f), shininess(50.0f), lightDistance(5.0f), groundDistance(0.78),
+      isGPGPU(false), hasComputeShaders(false), blinnPhong(true), fresnel(true), transparent(true), eta(1.5), lightIntensity(1.0f), shininess(50.0f), lightDistance(5.0f), groundDistance(0.78),
       shadowMap_fboId(0), shadowMap_rboId(0), shadowMap_textureId(0), fullScreenSnapshots(false), computeResult(0), Red(1.0f), Green(0.0f), Blue(0.0f), 
       m_indexBuffer(QOpenGLBuffer::IndexBuffer), ground_indexBuffer(QOpenGLBuffer::IndexBuffer)
 {
@@ -183,6 +183,18 @@ void glShaderWindow::blinnPhongClicked()
     renderNow();
 }
 
+void glShaderWindow::ArtisticClicked()
+{
+    fresnel = false;
+    renderNow();
+}
+
+void glShaderWindow::FresnelClicked()
+{
+    fresnel = true;
+    renderNow();
+}
+
 void glShaderWindow::transparentClicked()
 {
     transparent = true;
@@ -266,6 +278,21 @@ QWidget *glShaderWindow::makeAuxWindow()
     vbox2->addWidget(transparent2);
     groupBox2->setLayout(vbox2);
     buttons->addWidget(groupBox2);
+
+    QGroupBox *groupBox3 = new QGroupBox("Fresnel Selection");
+    QRadioButton *radio11 = new QRadioButton("Fresnel");
+    QRadioButton *radio22 = new QRadioButton("Artistric Friendly Fresnel");
+    if (fresnel) radio11->setChecked(true);
+    else radio11->setChecked(true);
+    connect(radio11, SIGNAL(clicked()), this, SLOT(FresnelClicked()));
+    connect(radio22, SIGNAL(clicked()), this, SLOT(ArtisticClicked()));
+
+    QVBoxLayout *vbox3 = new QVBoxLayout;
+    vbox3->addWidget(radio11);
+    vbox3->addWidget(radio22);
+    groupBox3->setLayout(vbox3);
+    buttons->addWidget(groupBox3);
+
     outer->addLayout(buttons);
 
     // light source intensity
@@ -1148,6 +1175,7 @@ void glShaderWindow::render()
         compute_program->setUniformValue("lightPosition", lightPosition);
         compute_program->setUniformValue("lightIntensity", 1.0f);
         compute_program->setUniformValue("blinnPhong", blinnPhong);
+        compute_program->setUniformValue("fresnel", fresnel);
         compute_program->setUniformValue("transparent", transparent);
         compute_program->setUniformValue("lightIntensity", lightIntensity);
         compute_program->setUniformValue("shininess", shininess);
@@ -1216,6 +1244,7 @@ void glShaderWindow::render()
     m_program->setUniformValue("lightPosition", lightPosition);
     m_program->setUniformValue("lightIntensity", 1.0f);
     m_program->setUniformValue("blinnPhong", blinnPhong);
+    m_program->setUniformValue("fresnel", fresnel);
     m_program->setUniformValue("transparent", transparent);
     m_program->setUniformValue("lightIntensity", lightIntensity);
     m_program->setUniformValue("shininess", shininess);
@@ -1248,6 +1277,7 @@ void glShaderWindow::render()
         ground_program->setUniformValue("normalMatrix", m_matrix[0].normalMatrix());
         ground_program->setUniformValue("lightIntensity", 1.0f);
         ground_program->setUniformValue("blinnPhong", blinnPhong);
+        ground_program->setUniformValue("fresnel", fresnel);
         ground_program->setUniformValue("transparent", transparent);
         ground_program->setUniformValue("lightIntensity", lightIntensity);
         ground_program->setUniformValue("shininess", shininess);
