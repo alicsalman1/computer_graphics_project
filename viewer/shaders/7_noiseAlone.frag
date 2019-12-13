@@ -205,15 +205,15 @@ float snoise(const in vec3 P) {
     n3 = t3 * t3 * dot(grad3, Pf3);
   }
 
-  // Sum up and scale the result to cover the range [-1,1]
+  // Sum up and scale the result to cover the range [-1,#include functions shared with other shaders. 
   return 32.0 * (n0 + n1 + n2 + n3);
 }
 
 vec3 perlinNoise(in vec3 v) {
     vec3 val = vec3(0.0);
     vec3 amplitude = vec3(1);
-    int octaves = 5;
-    float lacunarity = 2;
+    int octaves = 6;
+    float lacunarity = 2.20703125;
     float persistence = 0.2;
     v *= 8.0;
     for (int n = 0; n < octaves ; n++) {
