@@ -46,10 +46,29 @@ layout (std430, binding = 4) buffer Meshes
 
 bool intersectBoundingBox(vec4 origin, vec4 dir) {
 	// TODO
-    return false;
+  vec3 dir_inv = 1/dir.xyz;
+  double tx1 = (bbmin.x - origin.x)*dir_inv.x;
+  double tx2 = (bbmax.x - origin.x)*dir_inv.x;
+
+  double tmin = min(tx1, tx2);
+  double tmax = max(tx1, tx2);
+
+  double ty1 = (bbmin.y - origin.y)*dir_inv.y;
+  double ty2 = (bbmax.y - origin.y)*dir_inv.y;
+
+  tmin = max(tmin, min(ty1, ty2));
+  tmax = min(tmax, max(ty1, ty2));
+
+  double tz1 = (bbmin.z - origin.z)*dir_inv.z;
+  double tz2 = (bbmax.z - origin.z)*dir_inv.z;
+
+  tmin = max(tmin, min(tz1, tz2));
+  tmax = min(tmax, max(tz1, tz2));
+
+  return tmax >= tmin;
 }
 
-bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist) 
+bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist)
 {
 	// TODO
     return false;
@@ -88,7 +107,10 @@ const int MAX_TRACE = 1;
 vec4 trace(vec4 origin, vec4 dir)
 {
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
-    return vec4(1);
+  if (intersectBoundingBox(origin,dir))
+        return vec4(1,0,0,1);
+    else
+        return vec4(1,1,1,1);
 }
 
 layout (local_size_x = 8, local_size_y = 8) in;
@@ -98,11 +120,11 @@ void main(void) {
     if (pix.x >= size.x || pix.y >= size.y) {
         return;
     }
-    vec2 pos = pix / (size - vec2(0.5,0.5)); 
+    vec2 pos = pix / (size - vec2(0.5,0.5));
     // pos in [0,1]^2 Need it in [-1,1]^2:
     pos = 2 * pos - vec2(1.,1.);
 
-    // Step 1: I need pixel coordinates. 
+    // Step 1: I need pixel coordinates.
     vec4 worldPos = vec4(pos.x, pos.y, 1.0, 1.0);
     worldPos = persp_inverse * worldPos;
     worldPos /= worldPos.w;
