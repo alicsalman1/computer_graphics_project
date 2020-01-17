@@ -103,6 +103,7 @@ void main( void )
      vec4 ambient = ka * vertColor * lightIntensity;
      vec4 diffuse = kd * vertColor * max(dot(vertNormal, lightVector), 0) * lightIntensity;
 
+    // Blinn-Phong Model
      if (blinnPhong)
      {      
           specular = F * vertColor * pow(max(dot(vertNormal, halfvector), 0), shininess) * lightIntensity;
@@ -110,6 +111,7 @@ void main( void )
           fragColor = ambient + diffuse + specular;
      }
 
+    // Cook- Model
      else
      {
           float alpha = 0.4;
