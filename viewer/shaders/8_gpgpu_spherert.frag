@@ -26,7 +26,6 @@ vec4 getColorFromEnvironment(in vec3 direction)
     float longtitute = atan(direction.y , direction.x);
     vec2 coord = vec2(longtitute/(2*M_PI) + 0.5, latitute/M_PI);
     return texture(envMap, coord);
-    // return vec4(1);
 }
 
 
@@ -42,7 +41,7 @@ bool raySphereIntersect(in vec3 start, in vec3 direction, out vec3 newPoint) {
         float t1 = t - x;
         float t2 = t + x;
         newPoint = start + direction * t1;
-  
+
         return true;
     }
     return false;
@@ -55,22 +54,35 @@ vec3 get_reflection(in vec3 incidentRay, in vec3 normal){
 }
 
 
-vec3 get_refraction(in vec3 incidentRay){
+vec3 get_refraction(in vec3 incidentRay, in vec3 normal, in float coef){
+    float cosi = dot(incidentRay, normal);
 
-    float coef = 1.0003/1.517;
-    float cosi = dot(incidentRay, vertNormal.xyz);
-
-    return normalize(coef * incidentRay + (coef * cosi - sqrt(1 - coef * coef * (1 - cosi * cosi))) * vertNormal.xyz);
+    return normalize(coef * incidentRay + (coef * cosi - sqrt(1 - coef * coef * (1 - cosi * cosi))) * normal);
 }
 
 
-float computefresnel(float eta, float cosangle)
-{
-     float ci = sqrt(eta * eta - (1 - cosangle * cosangle));
-     float fs = pow((cosangle - ci)/(cosangle + ci), 2);
-     float fp = pow((eta * eta * cosangle - ci)/(eta * eta * cosangle + ci), 2);  
+float computefresnel(vec3 I, vec3 N, float ior){
+    float cosi = dot(I, N);
+    float etai = 1;
+    float etat = ior;
+    float kr;
+    if(cosi > 0){
+        etai = etat;
+        etat = 1;
+    }
 
-     return (fs + fp)/2;
+    float sint = (etai / etat) * sqrt(max(0, 1 - cosi * cosi));
+    if(sint > 1){
+        kr = 1;
+    }
+    else{
+        float cost = sqrt(max(0, 1 - sint * sint));
+        cosi = abs(cosi);
+        float Rs = ((etat * cosi) - (etai * cost)) / ((etat * cosi) + (etai * cost)); 
+        float Rp = ((etai * cosi) - (etat * cost)) / ((etai * cosi) + (etat * cost)); 
+        kr = (Rs * Rs + Rp * Rp) / 2;
+    }
+    return kr;
 }
 
 
@@ -92,14 +104,49 @@ void main(void){
     vec4 textcolor;
     vec3 intersect;
 
-    textcolor = getColorFromEnvironment(u);
-    vec3 reflectedRay;
-
     if(raySphereIntersect(eye, u, intersect)){
-        // color = 1;
+        vec3 reflectedRay;
         vec3 sphere_normal = normalize(intersect - center); 
-        reflectedRay = get_reflection(u, sphere_normal);
-        textcolor = getColorFromEnvironment(reflectedRay);        
+
+        if(transparent){
+            
+            vec3 refractedRay = get_refraction(u, sphere_normal, 1.0003/1.517);
+            vec3 intersect_array[4];
+            float F = computefresnel(u, sphere_normal, 1.517);
+
+            raySphereIntersect(intersect, refractedRay, intersect_array[0]);
+            vec3 refractedRay2 = get_refraction(refractedRay, normalize(intersect_array[0] - center), 1.517/1.0003);
+            float F1 = computefresnel(refractedRay, normalize(intersect_array[0] - center), 1.517);
+
+            vec3 reflectedRay2 = get_reflection(refractedRay, normalize(intersect_array[0] - center));
+            raySphereIntersect(intersect_array[0], reflectedRay2, intersect_array[1]);
+            vec3 refractedRay3 = get_refraction(reflectedRay2, normalize(intersect_array[1] - center), 1.517/1.0003);
+            float F2 = computefresnel(refractedRay3, normalize(intersect_array[1] - center), 1.517);
+
+            vec3 reflectedRay3 = get_reflection(reflectedRay2, normalize(intersect_array[1] - center));
+            raySphereIntersect(intersect_array[1], reflectedRay3, intersect_array[2]);
+            vec3 refractedRay4 = get_refraction(reflectedRay3, normalize(intersect_array[2] - center), 1.517/1.0003);
+            float F3 = computefresnel(refractedRay4, normalize(intersect_array[2] - center), 1.517);
+
+            vec3 reflectedRay4 = get_reflection(reflectedRay3, normalize(intersect_array[2] - center));
+            raySphereIntersect(intersect_array[2], reflectedRay4, intersect_array[3]);
+            vec3 refractedRay5 = get_refraction(reflectedRay4, normalize(intersect_array[3] - center), 1.517/1.0003);
+            float F4 = computefresnel(refractedRay5, normalize(intersect_array[3] - center), 1.517);
+
+            textcolor = (1 - F) * ((1 - F1) * getColorFromEnvironment(refractedRay2) +
+                                   F1 * (1 - F2) * getColorFromEnvironment(refractedRay3) +
+                                   F1 * F2 * (1 - F3) * getColorFromEnvironment(refractedRay4) +
+                                   F1 * F2 * F3 * (1 - F4) * getColorFromEnvironment(refractedRay5));
+        }
+
+        else{
+            reflectedRay = get_reflection(u, sphere_normal);
+            textcolor = getColorFromEnvironment(reflectedRay);        
+        }
+    }
+
+    else{
+        textcolor = getColorFromEnvironment(u);
     }
     
     fragColor = textcolor;
