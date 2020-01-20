@@ -14,13 +14,22 @@ uniform vec3 bbmax;
 uniform float radius;
 uniform float groundDistance;
 uniform vec3 center;
+uniform bool blinnPhong;
+uniform bool fresnel;
 
 #define MAX_SCENE_BOUNDS    10.0
 #define EPS                 0.000001
+#define INF                 1000000;
 
+float Ka = 0.7;// ambient reflection coefficient
+float Kd = 0.5;// diffuse reflection coefficient
 
 struct hitinfo_t {
     vec4 t;
+    vec4 barycentric;
+    vec4 hitpoint;
+    vec4 hit_barycentric;
+    int vptr;
     int hit_vptr;
 };
 
@@ -43,6 +52,69 @@ layout (std430, binding = 4) buffer Meshes
 {
     int indices[];
 };
+
+float shadowingG(float alpha, float cosangle)
+{
+     float tan_sqr = (1 - cosangle*cosangle)/(cosangle*cosangle);
+
+     return 2/(1 + sqrt(1 + alpha*alpha + tan_sqr));
+}
+
+float microfacetNormalDistribution(float alpha, float cosangle)
+{
+     float tan_sqr = (1 - cosangle*cosangle)/(cosangle*cosangle);
+     float alpha_sqr = alpha*alpha;
+     float pi = 3.14159;
+
+     return (alpha_sqr)/(pi*pow(cosangle, 4)*pow(alpha_sqr+tan_sqr, 2));
+}
+
+float computefresnel(float eta, float cosangle)
+{
+     float ci = sqrt(eta * eta - (1 - cosangle * cosangle));
+     float fs = pow((cosangle - ci)/(cosangle + ci), 2);
+     float fp = pow((eta * eta * cosangle - ci)/(eta * eta * cosangle + ci), 2);
+
+     return (fs + fp)/2;
+}
+float n_min(float r){
+    return (1-r)/(1+r);
+}
+float n_max(float r){
+    return (1+sqrt(r))/(1-sqrt(r));
+}
+float get_n(float r,float g){
+    return n_min(r)*g + (1-g)*n_max(r);
+}
+float get_k2(float r, float n){
+    float nr = (n+1)*(n+1)*r-(n-1)*(n-1);
+    return nr/(1-r);
+}
+float get_r(float n, float k){
+    return ((n-1)*(n-1)+k*k)/((n+1)*(n+1)+k*k);
+}
+float get_g(float n, float k){
+    float r = get_r(n,k);
+    return (n_max(r)-n)/(n_max(r)-n_min(r));
+}
+float Afresnel(float _r, float g,float theta){
+    //clamp parameters
+//     float _r = clamp(r,0,0.99);
+    //compute n and k
+    float n = get_n(_r,g);
+    float k2 = get_k2(_r,n);
+
+    float c = cos(theta);
+    float rs_num = n*n + k2 - 2*n*c + c*c;
+    float rs_den = n*n + k2 + 2*n*c + c*c;
+    float rs = rs_num/rs_den;
+
+    float rp_num = (n*n + k2)*c*c - 2*n*c + 1;
+    float rp_den = (n*n + k2)*c*c + 2*n*c + 1;
+    float rp = rp_num/rp_den;
+
+    return 0.5*(rs+rp);
+}
 
 bool intersectBoundingBox(vec4 origin, vec4 dir) {
 	// TODO
@@ -108,25 +180,40 @@ bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist)
 vec4 interpolateNormal(hitinfo_t h)
 {
 	// TODO
-    return vec4(1);
+  vec4 VertNormal = normalize((h.hit_barycentric.z *normalize(normals[indices[h.hit_vptr]]) + h.hit_barycentric.x * normalize(normals[indices[h.hit_vptr + 1]]) + h.hit_barycentric.y *normalize(normals[indices[h.hit_vptr + 2]])));
+  return VertNormal;
+
 }
 
 vec4 interpolateColor(hitinfo_t h)
 {
 	// TODO
-	return vec4(1);
+  vec4 colorNormal = h.hit_barycentric.z * colors[indices[h.hit_vptr]]+ h.hit_barycentric.x*colors[indices[ h.hit_vptr+1]] + h.hit_barycentric.y*colors[indices[h.hit_vptr+2]];
+  return colorNormal;
+
 }
 
 bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
 {
-    vec4 dist; // stores distance + barycentric coord
-	bool hit = false;
+  vec4 dist; // stores distance + barycentric coord
+  float  shorter_dist = INF;
+  bool hit = false;
 	h.t.x = radius * MAX_SCENE_BOUNDS;
 	if(intersectBoundingBox(origin, dir)) {
 		for(int j = 0; j < indices.length(); j += 3) {
 			if(intersectTriangle(origin, dir, j, dist)) {
 				// TODO
         hit = true;
+        h.barycentric = dist;
+        h.vptr = j;
+        if( h.barycentric.w < shorter_dist){
+            //intersect triangle
+            h.hit_vptr = j;
+            h.hit_barycentric = h.barycentric;
+            shorter_dist = h.barycentric.w;
+            //closest intersection point
+            h.hitpoint = origin + h.barycentric.w * dir;
+            }
 			}
 		}
 	}
@@ -139,11 +226,67 @@ const int MAX_TRACE = 1;
 vec4 trace(vec4 origin, vec4 dir)
 {
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
-  hitinfo_t h;
+  hitinfo_t h,h2;
+  vec4 color;
   if (isIntersected(origin,dir,h))
-        return vec4(1,0,0,1);
-    else
-        return vec4(1,1,1,1);
+  {
+
+  vec4 lightDirection= vec4(0,0,0,0);
+  lightDirection.xyz = normalize(lightPosition - h.hitpoint.xyz);
+  vec4 eyeVector  = normalize((mat_inverse *vec4(0,0,0,1) - h.hitpoint));
+  vec4 VertNormal = normalize(interpolateNormal(h));
+  vec4 vertColor = interpolateColor(h);
+  vec4 ambient = Ka  * vertColor  * lightIntensity;
+
+  //If it intersects something, this point is in shadow. Use only ambiant lighting.
+  if(isIntersected(h.hitpoint, lightDirection, h2))
+  {
+    color = ambient;
+  }
+  else
+  //Computer full illumination Model
+  {
+  float F;
+  vec4 specular;
+  vec3 halfvector = normalize(eyeVector.xyz + lightDirection.xyz);
+  float costheta = dot(halfvector, lightDirection.xyz);
+  vec4 diffuse = Kd * max(dot(VertNormal,lightDirection),0.0) * lightIntensity * vertColor;
+      if(fresnel)
+      {
+         F = computefresnel(eta, costheta);
+      }
+      else
+      {
+         F = Afresnel(0.4, 0.5, costheta);
+      }
+      // Blinn-Phong Model
+       if (blinnPhong)
+       {
+            specular = F * vertColor * pow(max(dot(VertNormal.xyz, halfvector), 0), shininess) * lightIntensity;
+
+            color = ambient + diffuse + specular;
+       }
+
+      // Cook- Model
+       else
+       {
+            float alpha = 0.4;
+            float cosh = dot(halfvector, VertNormal.xyz);
+            float cosi = dot(VertNormal, lightDirection);
+            float coso = dot(VertNormal, eyeVector);
+
+            float D = microfacetNormalDistribution(alpha, cosh);
+            float G1i = shadowingG(alpha, cosi);
+            float G1o = shadowingG(alpha, coso);
+
+            specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
+            color = ambient + diffuse + specular;
+       }
+  }
+  }
+
+  //  else
+return color;
 }
 
 layout (local_size_x = 8, local_size_y = 8) in;
