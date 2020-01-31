@@ -248,9 +248,10 @@ vec4 trace(vec4 origin, vec4 dir)
   {
   float F;
   vec4 specular;
-  vec3 halfvector = normalize(eyeVector.xyz + lightDirection.xyz);
-  float costheta = dot(halfvector, lightDirection.xyz);
-  vec4 diffuse = Kd * max(dot(VertNormal,lightDirection),0.0) * lightIntensity * vertColor;
+float costheta = dot(eyeVector, lightDirection);
+  vec4 halfvector = normalize(eyeVector + lightDirection);
+ 
+  vec4 diffuse = Kd  * vertColor * max(dot(VertNormal,lightDirection),0.0) * lightIntensity;
       if(fresnel)
       {
          F = computefresnel(eta, costheta);
@@ -260,28 +261,28 @@ vec4 trace(vec4 origin, vec4 dir)
          F = Afresnel(0.4, 0.5, costheta);
       }
       // Blinn-Phong Model
-       if (blinnPhong)
-       {
-            specular = F * vertColor * pow(max(dot(VertNormal.xyz, halfvector), 0), shininess) * lightIntensity;
+    if (blinnPhong)
+    {
+        specular = F * vertColor * pow(max(dot(VertNormal, halfvector), 0), shininess) * lightIntensity;
 
-            color = ambient + diffuse + specular;
-       }
+        color = ambient + diffuse + specular;
+    }
 
-      // Cook- Model
-       else
-       {
-            float alpha = 0.4;
-            float cosh = dot(halfvector, VertNormal.xyz);
-            float cosi = dot(VertNormal, lightDirection);
-            float coso = dot(VertNormal, eyeVector);
+    // Cook- Model
+    else
+    {
+        float alpha = 0.4;
+        float cosh = dot(halfvector, VertNormal);
+        float cosi = dot(VertNormal, lightDirection);
+        float coso = dot(VertNormal, eyeVector);
 
-            float D = microfacetNormalDistribution(alpha, cosh);
-            float G1i = shadowingG(alpha, cosi);
-            float G1o = shadowingG(alpha, coso);
+        float D = microfacetNormalDistribution(alpha, cosh);
+        float G1i = shadowingG(alpha, cosi);
+        float G1o = shadowingG(alpha, coso);
 
-            specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
-            color = ambient + diffuse + specular;
-       }
+        specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
+        color = ambient + diffuse + specular;
+    }
   }
   }
 
