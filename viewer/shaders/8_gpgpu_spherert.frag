@@ -20,11 +20,11 @@ out vec4 fragColor;
 
 vec4 getColorFromEnvironment(in vec3 direction)
 {
-    // TODO
     float sphereRadius = length(direction);
     float latitute = acos(direction.z/ sphereRadius);
     float longtitute = atan(direction.y , direction.x);
     vec2 coord = vec2(longtitute/(2*M_PI) + 0.5, latitute/M_PI);
+
     return texture(envMap, coord);
 }
 
@@ -114,6 +114,7 @@ void main(void){
             vec3 intersect_array[4];
             float F = computefresnel(u, sphere_normal, 1.517);
 
+            // bounce 1
             raySphereIntersect(intersect, refractedRay, intersect_array[0]);
             vec3 refractedRay2 = get_refraction(refractedRay, normalize(intersect_array[0] - center), 1.517/1.0003);
             float F1 = computefresnel(refractedRay, normalize(intersect_array[0] - center), 1.517);
@@ -138,13 +139,13 @@ void main(void){
                                    F1 * F2 * (1 - F3) * getColorFromEnvironment(refractedRay4) +
                                    F1 * F2 * F3 * (1 - F4) * getColorFromEnvironment(refractedRay5));
         }
-
+        // opaque 
         else{
             reflectedRay = get_reflection(u, sphere_normal);
             textcolor = getColorFromEnvironment(reflectedRay);        
         }
     }
-
+    // background
     else{
         textcolor = getColorFromEnvironment(u);
     }
