@@ -14,14 +14,31 @@ uniform vec3 bbmax;
 uniform float radius;
 uniform float groundDistance;
 uniform vec3 center;
+uniform bool blinnPhong;
+uniform bool fresnel;
 
 #define MAX_SCENE_BOUNDS    10.0
 #define EPS                 0.000001
+#define ZERO                0.001
+#define INF                 1000000;
 
+float Ka = 0.7;// ambient reflection coefficient
+float Kd = 0.5;// diffuse reflection coefficient
 
 struct hitinfo_t {
     vec4 t;
+    vec4 barycentric;
+    vec4 hitpoint;
+    vec4 hit_barycentric;
+    int vptr;
     int hit_vptr;
+};
+
+struct rayinfo {
+    vec4 origin;
+    vec4 dir;
+    vec4 hitpoint;
+    vec4 reflectRay;
 };
 
 layout (std430, binding = 1) buffer Vertices
@@ -44,74 +61,324 @@ layout (std430, binding = 4) buffer Meshes
     int indices[];
 };
 
-bool intersectBoundingBox(vec4 origin, vec4 dir) {
-	// TODO
-    return false;
+float shadowingG(float alpha, float cosangle)
+{
+     float tan_sqr = (1 - cosangle*cosangle)/(cosangle*cosangle);
+
+     return 2/(1 + sqrt(1 + alpha*alpha + tan_sqr));
 }
 
-bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist) 
+float microfacetNormalDistribution(float alpha, float cosangle)
+{
+     float tan_sqr = (1 - cosangle*cosangle)/(cosangle*cosangle);
+     float alpha_sqr = alpha*alpha;
+     float pi = 3.14159;
+
+     return (alpha_sqr)/(pi*pow(cosangle, 4)*pow(alpha_sqr+tan_sqr, 2));
+}
+
+float computefresnel(float eta, float cosangle)
+{
+     float ci = sqrt(eta * eta - (1 - cosangle * cosangle));
+     float fs = pow((cosangle - ci)/(cosangle + ci), 2);
+     float fp = pow((eta * eta * cosangle - ci)/(eta * eta * cosangle + ci), 2);
+
+     return (fs + fp)/2;
+}
+float n_min(float r){
+    return (1-r)/(1+r);
+}
+float n_max(float r){
+    return (1+sqrt(r))/(1-sqrt(r));
+}
+float get_n(float r,float g){
+    return n_min(r)*g + (1-g)*n_max(r);
+}
+float get_k2(float r, float n){
+    float nr = (n+1)*(n+1)*r-(n-1)*(n-1);
+    return nr/(1-r);
+}
+float get_r(float n, float k){
+    return ((n-1)*(n-1)+k*k)/((n+1)*(n+1)+k*k);
+}
+float get_g(float n, float k){
+    float r = get_r(n,k);
+    return (n_max(r)-n)/(n_max(r)-n_min(r));
+}
+float Afresnel(float _r, float g,float theta){
+    //clamp parameters
+//     float _r = clamp(r,0,0.99);
+    //compute n and k
+    float n = get_n(_r,g);
+    float k2 = get_k2(_r,n);
+
+    float c = cos(theta);
+    float rs_num = n*n + k2 - 2*n*c + c*c;
+    float rs_den = n*n + k2 + 2*n*c + c*c;
+    float rs = rs_num/rs_den;
+
+    float rp_num = (n*n + k2)*c*c - 2*n*c + 1;
+    float rp_den = (n*n + k2)*c*c + 2*n*c + 1;
+    float rp = rp_num/rp_den;
+
+    return 0.5*(rs+rp);
+}
+
+bool intersectBoundingBox(vec4 origin, vec4 dir) {
+	// TODO
+  vec3 dir_inv = 1/dir.xyz;
+  double tx1 = (bbmin.x - origin.x)*dir_inv.x;
+  double tx2 = (bbmax.x - origin.x)*dir_inv.x;
+
+  double tmin = min(tx1, tx2);
+  double tmax = max(tx1, tx2);
+
+  double ty1 = (bbmin.y - origin.y)*dir_inv.y;
+  double ty2 = (bbmax.y - origin.y)*dir_inv.y;
+
+  tmin = max(tmin, min(ty1, ty2));
+  tmax = min(tmax, max(ty1, ty2));
+
+  double tz1 = (bbmin.z - origin.z)*dir_inv.z;
+  double tz2 = (bbmax.z - origin.z)*dir_inv.z;
+
+  tmin = max(tmin, min(tz1, tz2));
+  tmax = min(tmax, max(tz1, tz2));
+
+  return tmax >= tmin;
+}
+
+bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist)
 {
 	// TODO
+
+  vec3 v0 = vertices[indices[ptr]].xyz;
+  vec3 v1 = vertices[indices[ptr + 1]].xyz;
+  vec3 v2 = vertices[indices[ptr + 2]].xyz;
+  vec3 e1 = v1 - v0;
+  vec3 e2 = v2 - v0;
+  vec3 tVec = origin.xyz - v0;
+  vec3 pVec = cross(dir.xyz,e2);
+  vec3 qVec = cross(tVec,e1);
+  float det = dot(pVec,e1) ;
+
+  // if the determinant is negative the triangle is backfacing
+  // if the determinant is close to 0, the ray misses the triangle
+  if (det < EPS) return false;
+  // ray and triangle are parallel if det is close to 0
+  if (abs(det) < EPS) return false;
+
+  //else
+  float invDet = 1 / det;
+
+  float u = dot(tVec,pVec) * invDet;
+  if (u < 0 || u > 1) return false;
+
+  float v = dot(dir.xyz,qVec) * invDet;
+  if (v < 0 || u + v > 1) return false;
+
+  float t = dot(e2,qVec) * invDet;
+
+  dist = vec4(u,v,1-u-v,t);
+
+  return true;
+
+}
+bool intersectGround(vec4 origin, vec4 dir,vec4 normal, out vec4 newPoint) {
+    float lambda;
+    vec3 planePoint = vec3(0, -groundDistance,0);
+    vec3 PQ = -(origin).xyz + planePoint ;
+    vec3 normalPlane = normalize(normal.xyz);
+    vec3 direction = normalize(dir.xyz);
+    if(abs(dot(direction,normalPlane)) > EPS)
+    	  lambda = dot(PQ, normalPlane)/dot(direction,normalPlane);
+    else
+        lambda = -INF;
+    newPoint = origin + lambda * normalize(dir);
+    vec4 distvec = newPoint - origin;
+    float r = 30;
+    float dist2 = length(distvec);
+    if(lambda > 0.0){//if radius less than r and origin is higher than plane
+        if(dist2 < (r*r) && origin.y > planePoint.y)
+              return true;
+    }
     return false;
+
 }
 
 vec4 interpolateNormal(hitinfo_t h)
 {
 	// TODO
-    return vec4(1);
+  vec4 VertNormal = normalize((h.hit_barycentric.z *normalize(normals[indices[h.hit_vptr]]) + h.hit_barycentric.x * normalize(normals[indices[h.hit_vptr + 1]]) + h.hit_barycentric.y *normalize(normals[indices[h.hit_vptr + 2]])));
+  return VertNormal;
+
 }
 
 vec4 interpolateColor(hitinfo_t h)
 {
 	// TODO
-	return vec4(1);
+  vec4 colorNormal = h.hit_barycentric.z * colors[indices[h.hit_vptr]]+ h.hit_barycentric.x*colors[indices[ h.hit_vptr+1]] + h.hit_barycentric.y*colors[indices[h.hit_vptr+2]];
+  return colorNormal;
+
 }
 
 bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
 {
-    vec4 dist; // stores distance + barycentric coord
-	bool hit = false;
+  vec4 dist; // stores distance + barycentric coord
+  float  shorter_dist = INF;
+  bool hit = false;
 	h.t.x = radius * MAX_SCENE_BOUNDS;
 	if(intersectBoundingBox(origin, dir)) {
 		for(int j = 0; j < indices.length(); j += 3) {
 			if(intersectTriangle(origin, dir, j, dist)) {
 				// TODO
+        hit = true;
+        h.barycentric = dist;
+        h.vptr = j;
+        if( h.barycentric.w < shorter_dist){
+            //intersect triangle
+            h.hit_vptr = j;
+            h.hit_barycentric = h.barycentric;
+            shorter_dist = h.barycentric.w;
+            //closest intersection point
+            h.hitpoint = origin + h.barycentric.w * dir;
+            }
 			}
 		}
 	}
 	return hit;
 }
 
-const int MAX_TRACE = 1;
+const int MAX_TRACE = 5;
 
 
-vec4 trace(vec4 origin, vec4 dir)
+vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out rayinfo rayos)
 {
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
-    return vec4(1);
+    hitinfo_t h,h2;
+    vec4 color;
+    if (isIntersected(origin,dir,h))
+    {
+        vec4 lightDirection= vec4(0,0,0,0);
+        lightDirection.xyz = normalize(lightPosition - h.hitpoint.xyz);
+        vec4 eyeVector  = normalize((mat_inverse *vec4(0,0,0,1) - h.hitpoint));
+        vec4 VertNormal = normalize(interpolateNormal(h));
+        vec4 vertColor = interpolateColor(h);
+        vec4 ambient = Ka  * vertColor  * lightIntensity;
+
+        //If it intersects something, this point is in shadow. Use only ambiant lighting.
+        if(isIntersected(h.hitpoint, lightDirection, h2))
+        {
+            color = ambient;
+        }
+        //Computer full illumination Model
+        else
+        {
+            float F;
+            vec4 specular;
+            float costheta = dot(eyeVector, lightDirection);
+            vec4 halfvector = normalize(eyeVector + lightDirection);
+
+            vec4 diffuse = Kd  * vertColor * max(dot(VertNormal,lightDirection),0.0) * lightIntensity;
+            if(fresnel)
+            {
+                F = computefresnel(eta, costheta);
+            }
+            else
+            {
+                F = Afresnel(0.4, 0.5, costheta);
+            }
+            // Blinn-Phong Model
+            if (blinnPhong)
+            {
+                specular = F * vertColor * pow(max(dot(VertNormal, halfvector), 0), shininess) * lightIntensity;
+
+                color = ambient + diffuse + specular;
+            }
+
+            // Cook- Model
+            else
+            {
+                float alpha = 0.4;
+                float cosh = dot(halfvector, VertNormal);
+                float cosi = dot(VertNormal, lightDirection);
+                float coso = dot(VertNormal, eyeVector);
+
+                float D = microfacetNormalDistribution(alpha, cosh);
+                float G1i = shadowingG(alpha, cosi);
+                float G1o = shadowingG(alpha, coso);
+
+                specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
+                color = ambient + diffuse + specular;
+            }
+        }
+        rayos.origin = origin;
+        rayos.dir = dir;
+        rayos.hitpoint = h.hitpoint;
+        rayos.reflectRay = normalize(reflect(dir,VertNormal));
+    }
+
+    else{
+        
+        vec4 newPoint;
+        vec4 groundNormal= vec4(0,1,0,0);
+        //ground
+        if(intersectGround(origin,dir,groundNormal, newPoint)){
+            bouncing = true;
+            vec2 newPoint_pixel = vec2(newPoint.x/200,(newPoint.z/200));
+            color  = (texture2D(colorTexture,newPoint_pixel));
+            vec4 lightDirection= vec4(0,0,0,0);
+            lightDirection.xyz = normalize(lightPosition - newPoint.xyz);
+            // shadow on ground: if intersection with something, then the hitpoint is in shadow
+            if(isIntersected(newPoint + ZERO * lightDirection, lightDirection, h2))
+            { //if intersect something, reduce color to get shadow
+            color = 0.5 * color ;
+            }
+
+            rayos.origin = origin;
+            rayos.dir = dir;
+            rayos.hitpoint = newPoint;
+            rayos.reflectRay = normalize(reflect(dir,groundNormal));
+        }
+
+    }
+    return color;
 }
 
 layout (local_size_x = 8, local_size_y = 8) in;
 void main(void) {
+
     ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = imageSize(framebuffer);
     if (pix.x >= size.x || pix.y >= size.y) {
         return;
     }
-    vec2 pos = pix / (size - vec2(0.5,0.5)); 
+    vec2 pos = pix / (size - vec2(0.5,0.5));
     // pos in [0,1]^2 Need it in [-1,1]^2:
     pos = 2 * pos - vec2(1.,1.);
 
-    // Step 1: I need pixel coordinates. 
+    // Step 1: I need pixel coordinates.
+
     vec4 worldPos = vec4(pos.x, pos.y, 1.0, 1.0);
     worldPos = persp_inverse * worldPos;
     worldPos /= worldPos.w;
     worldPos.w = 0;
     worldPos = normalize(worldPos);
+
     // Step 2: ray direction:
+    rayinfo rayos[MAX_TRACE];
+    bool hit = false;
     vec4 dir = normalize((mat_inverse * worldPos));
     vec4 eye = (mat_inverse * vec4(0, 0, 0, 1));
-    vec4 color = trace(eye, dir);
-
+    vec4 color ;
+    //principle color
+    color = (0.7)*trace(eye, dir, hit,rayos[0]);
+    //indirect color
+    for(int i=1;i < MAX_TRACE ; i++){
+        if(hit)
+        {
+            color += pow(0.3,i)*(trace(rayos[i-1].hitpoint, rayos[i-1].reflectRay,hit, rayos[i]));
+        }
+    }
     imageStore(framebuffer, pix, color);
 }
