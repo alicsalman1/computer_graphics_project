@@ -138,6 +138,7 @@ void main(void){
     bool flag = true;
     bool it_reflect = false;
 
+    // forward pass
     while(counter < NUM_SPHERES - 1){
         it_reflect = false;
         min_intersect = vec3(100.0, 100.0, 100.0);
@@ -149,7 +150,6 @@ void main(void){
                 min_intersect = intersect;
                 spheretoshow = spheres[i];
                 it_reflect = true;
-                // color = vec3(1.0, 0.0, 0.0);
             }
         }
         
@@ -168,31 +168,26 @@ void main(void){
             flag = false;
         }
     }
+
     int i = counter - 1;
     vec4 tmpcolor;
     tmpcolor = getColorFromEnvironment(get_reflection(intersections[i].ray, intersections[i].surface_normal));
     color = tmpcolor.xyz;
 
+    //backward pass
     if(it_reflect){
         
         while(i > 0){
-        // for(int i = counter-1; i > 0; i--){
-            
             float ka = 0.7;
             float kd = 0.5;
             vec4 specular;
             float F;
-            // This is the place where there's work to be done
 
             float costheta = dot(normalize(vec4(intersections[i].surface_point, 1.0)), normalize(light_pos - vec4(intersections[i].surface_point, 1.0)));
             vec4 halfvector = normalize(normalize(vec4(intersections[i].surface_point, 1.0)) + normalize(light_pos - vec4(intersections[i].surface_point, 1.0)));
-
             
             F = computefresnel(eta, costheta);
-            
-            // vec4 tmpcolor;
-            // tmpcolor = getColorFromEnvironment(get_reflection(intersections[i].ray, intersections[i].surface_normal));
-
+    
             vec4 ambient = ka * vec4(intersections[i].color, 1.0) * lightIntensity;
             vec4 diffuse = kd * vec4(intersections[i].color, 1.0) * max(dot(vec4(intersections[i].surface_normal, 1.0), normalize(light_pos - vec4(intersections[i].surface_point, 1.0))), 0) * lightIntensity;
         
@@ -205,19 +200,14 @@ void main(void){
             }
 
             else{
-                color =  getColorFromEnvironment(get_reflection(intersections[0].ray, intersections[0].surface_normal)).xyz;
+                color +=  getColorFromEnvironment(get_reflection(intersections[0].ray, intersections[0].surface_normal)).xyz;
             }
-            // color = (color + intersections[i-1].color) * computefresnel(intersections[i-2].ray, intersections[i-2].surface_normal, 1);
-            // color =  localcolor;
-
-            // color = fresnel(intersections[i].surface_normal, )
-
             i--;
         }    
-        // color += intersections[i-1].color;
-        // color = 
+       
         fragColor = vec4(color, 1.0);
     }
+
    else{
        fragColor = getColorFromEnvironment(u);
    }
