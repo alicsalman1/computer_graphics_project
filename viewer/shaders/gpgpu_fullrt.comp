@@ -19,6 +19,7 @@ uniform bool fresnel;
 
 #define MAX_SCENE_BOUNDS    10.0
 #define EPS                 0.000001
+#define ZERO                0.001
 #define INF                 1000000;
 
 float Ka = 0.7;// ambient reflection coefficient
@@ -31,6 +32,13 @@ struct hitinfo_t {
     vec4 hit_barycentric;
     int vptr;
     int hit_vptr;
+};
+
+struct rayinfo {
+    vec4 origin;
+    vec4 dir;
+    vec4 hitpoint;
+    vec4 reflectRay;
 };
 
 layout (std430, binding = 1) buffer Vertices
@@ -176,6 +184,27 @@ bool intersectTriangle(vec4 origin, vec4 dir, int ptr, out vec4 dist)
   return true;
 
 }
+bool intersectGround(vec4 origin, vec4 dir,vec4 normal, out vec4 newPoint) {
+    float lambda;
+    vec3 planePoint = vec3(0, -groundDistance,0);
+    vec3 PQ = -(origin).xyz + planePoint ;
+    vec3 normalPlane = normalize(normal.xyz);
+    vec3 direction = normalize(dir.xyz);
+    if(abs(dot(direction,normalPlane)) > EPS)
+    	  lambda = dot(PQ, normalPlane)/dot(direction,normalPlane);
+    else
+        lambda = -INF;
+    newPoint = origin + lambda * normalize(dir);
+    vec4 distvec = newPoint - origin;
+    float r = 30;
+    float dist2 = length(distvec);
+    if(lambda > 0.0){//if radius less than r and origin is higher than plane
+        if(dist2 < (r*r) && origin.y > planePoint.y)
+              return true;
+    }
+    return false;
+
+}
 
 vec4 interpolateNormal(hitinfo_t h)
 {
@@ -220,10 +249,10 @@ bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
 	return hit;
 }
 
-const int MAX_TRACE = 1;
+const int MAX_TRACE = 5;
 
 
-vec4 trace(vec4 origin, vec4 dir)
+vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out rayinfo rayos)
 {
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
   hitinfo_t h,h2;
@@ -250,7 +279,7 @@ vec4 trace(vec4 origin, vec4 dir)
   vec4 specular;
 float costheta = dot(eyeVector, lightDirection);
   vec4 halfvector = normalize(eyeVector + lightDirection);
- 
+
   vec4 diffuse = Kd  * vertColor * max(dot(VertNormal,lightDirection),0.0) * lightIntensity;
       if(fresnel)
       {
@@ -284,9 +313,35 @@ float costheta = dot(eyeVector, lightDirection);
         color = ambient + diffuse + specular;
     }
   }
+  rayos.origin = origin;
+  rayos.dir = dir;
+  rayos.hitpoint = h.hitpoint;
+  rayos.reflectRay = normalize(reflect(dir,VertNormal));
   }
+else
+  {
+        vec4 newPoint;
+        vec4 groundNormal= vec4(0,1,0,0);
+        //ground
+        if(intersectGround(origin,dir,groundNormal, newPoint)){
+            bouncing = true;
+            vec2 newPoint_pixel = vec2(newPoint.x/200,(newPoint.z/200));
+            color  = (texture2D(colorTexture,newPoint_pixel));
+            vec4 lightDirection= vec4(0,0,0,0);
+            lightDirection.xyz = normalize(lightPosition - newPoint.xyz);
+            // shadow on ground: if intersection with something, then the hitpoint is in shadow
+            if(isIntersected(newPoint + ZERO * lightDirection, lightDirection, h2))
+            { //if intersect something, reduce color to get shadow
+              color = 0.5 * color ;
+            }
 
-  //  else
+            rayos.origin = origin;
+            rayos.dir = dir;
+            rayos.hitpoint = newPoint;
+            rayos.reflectRay = normalize(reflect(dir,groundNormal));
+        }
+
+  }
 return color;
 }
 
@@ -303,15 +358,27 @@ void main(void) {
     pos = 2 * pos - vec2(1.,1.);
 
     // Step 1: I need pixel coordinates.
+
     vec4 worldPos = vec4(pos.x, pos.y, 1.0, 1.0);
     worldPos = persp_inverse * worldPos;
     worldPos /= worldPos.w;
     worldPos.w = 0;
     worldPos = normalize(worldPos);
+
     // Step 2: ray direction:
+    rayinfo rayos[MAX_TRACE];
+    bool hit = false;
     vec4 dir = normalize((mat_inverse * worldPos));
     vec4 eye = (mat_inverse * vec4(0, 0, 0, 1));
-    vec4 color = trace(eye, dir);
-
+    vec4 color ;
+    //principle color
+    color = (0.7)*trace(eye, dir, hit,rayos[0]);
+    //indirect color
+    for(int i=1;i < MAX_TRACE ; i++){
+        if(hit)
+        {
+            color += pow(0.3,i)*(trace(rayos[i-1].hitpoint, rayos[i-1].reflectRay,hit, rayos[i]));
+        }
+    }
     imageStore(framebuffer, pix, color);
 }
