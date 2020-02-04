@@ -34,11 +34,12 @@ struct hitinfo_t {
     int hit_vptr;
 };
 
-struct rayinfo {
+
+struct ray {
     vec4 origin;
     vec4 dir;
     vec4 hitpoint;
-    vec4 reflectRay;
+    vec4 reflectedRay;
 };
 
 layout (std430, binding = 1) buffer Vertices
@@ -227,7 +228,6 @@ bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
   vec4 dist; // stores distance + barycentric coord
   float  shorter_dist = INF;
   bool hit = false;
-	h.t.x = radius * MAX_SCENE_BOUNDS;
 	if(intersectBoundingBox(origin, dir)) {
 		for(int j = 0; j < indices.length(); j += 3) {
 			if(intersectTriangle(origin, dir, j, dist)) {
@@ -252,7 +252,7 @@ bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
 const int MAX_TRACE = 5;
 
 
-vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out rayinfo rayos)
+vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out ray rayon)
 {
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
     hitinfo_t h,h2;
@@ -312,14 +312,15 @@ vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out rayinfo rayos)
                 color = ambient + diffuse + specular;
             }
         }
-        rayos.origin = origin;
-        rayos.dir = dir;
-        rayos.hitpoint = h.hitpoint;
-        rayos.reflectRay = normalize(reflect(dir,VertNormal));
+        rayon.origin = origin;
+        rayon.dir = dir;
+        rayon.hitpoint = h.hitpoint;
+        rayon.reflectedRay = normalize(reflect(dir,VertNormal));
     }
 
     else{
-        
+
+
         vec4 newPoint;
         vec4 groundNormal= vec4(0,1,0,0);
         //ground
@@ -332,18 +333,24 @@ vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out rayinfo rayos)
             // shadow on ground: if intersection with something, then the hitpoint is in shadow
             if(isIntersected(newPoint + ZERO * lightDirection, lightDirection, h2))
             { //if intersect something, reduce color to get shadow
-            color = 0.5 * color ;
+
+              color = 0.5 * color ;
+
             }
 
-            rayos.origin = origin;
-            rayos.dir = dir;
-            rayos.hitpoint = newPoint;
-            rayos.reflectRay = normalize(reflect(dir,groundNormal));
+            rayon.origin = origin;
+            rayon.dir = dir;
+            rayon.hitpoint = newPoint;
+            rayon.reflectedRay = normalize(reflect(dir,groundNormal));
         }
 
-    }
-    return color;
+
+  }
+return color;
+
 }
+
+
 
 layout (local_size_x = 8, local_size_y = 8) in;
 void main(void) {
@@ -366,18 +373,18 @@ void main(void) {
     worldPos = normalize(worldPos);
 
     // Step 2: ray direction:
-    rayinfo rayos[MAX_TRACE];
+    ray rayon[MAX_TRACE];
     bool hit = false;
     vec4 dir = normalize((mat_inverse * worldPos));
     vec4 eye = (mat_inverse * vec4(0, 0, 0, 1));
     vec4 color ;
     //principle color
-    color = (0.7)*trace(eye, dir, hit,rayos[0]);
+    color = (0.7)*trace(eye, dir, hit,rayon[0]);
     //indirect color
     for(int i=1;i < MAX_TRACE ; i++){
         if(hit)
         {
-            color += pow(0.3,i)*(trace(rayos[i-1].hitpoint, rayos[i-1].reflectRay,hit, rayos[i]));
+            color += pow(0.3,i)*(trace(rayon[i-1].hitpoint, rayon[i-1].reflectedRay,hit, rayon[i]));
         }
     }
     imageStore(framebuffer, pix, color);
