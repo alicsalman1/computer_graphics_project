@@ -222,7 +222,51 @@ vec4 interpolateColor(hitinfo_t h)
   return colorNormal;
 
 }
+vec4 specularlight(vec4 ambient,vec4 lightDirection, vec4 eyeVector,vec4 VertNormal,vec4 vertColor){
 
+    float F;
+    vec4 color;
+    vec4 specular;
+    float costheta = dot(eyeVector, lightDirection);
+    vec4 halfvector = normalize(eyeVector + lightDirection);
+
+    vec4 diffuse = Kd  * vertColor * max(dot(VertNormal,lightDirection),0.0) * lightIntensity;
+    if(fresnel)
+    {
+        F = computefresnel(eta, costheta);
+    }
+    else
+    {
+        F = Afresnel(0.4, 0.5, costheta);
+    }
+    // Blinn-Phong Model
+    if (blinnPhong)
+    {
+        specular = F * vertColor * pow(max(dot(VertNormal, halfvector), 0), shininess) * lightIntensity;
+
+        color = ambient + diffuse + specular;
+
+    }
+
+    // Cook- Model
+    else
+    {
+        float alpha = 0.4;
+        float cosh = dot(halfvector, VertNormal);
+        float cosi = dot(VertNormal, lightDirection);
+        float coso = dot(VertNormal, eyeVector);
+
+        float D = microfacetNormalDistribution(alpha, cosh);
+        float G1i = shadowingG(alpha, cosi);
+        float G1o = shadowingG(alpha, coso);
+
+        specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
+        color = ambient + diffuse + specular;
+    }
+
+return color;
+
+}
 bool isIntersected(vec4 origin, vec4 dir, out hitinfo_t h)
 {
   vec4 dist; // stores distance + barycentric coord
@@ -257,6 +301,7 @@ vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out ray rayon)
 	// TODO: trace a ray in the scene, see what it intersects, bounce around
     hitinfo_t h,h2;
     vec4 color;
+    vec4 specular;
     if (isIntersected(origin,dir,h))
     {
         vec4 lightDirection= vec4(0,0,0,0);
@@ -269,49 +314,15 @@ vec4 trace(vec4 origin, vec4 dir,out bool bouncing, out ray rayon)
         //If it intersects something, this point is in shadow. Use only ambiant lighting.
         if(isIntersected(h.hitpoint, lightDirection, h2))
         {
-            color = ambient;
+        color = ambient;
         }
+
         //Computer full illumination Model
         else
         {
-            float F;
-            vec4 specular;
-            float costheta = dot(eyeVector, lightDirection);
-            vec4 halfvector = normalize(eyeVector + lightDirection);
-
-            vec4 diffuse = Kd  * vertColor * max(dot(VertNormal,lightDirection),0.0) * lightIntensity;
-            if(fresnel)
-            {
-                F = computefresnel(eta, costheta);
-            }
-            else
-            {
-                F = Afresnel(0.4, 0.5, costheta);
-            }
-            // Blinn-Phong Model
-            if (blinnPhong)
-            {
-                specular = F * vertColor * pow(max(dot(VertNormal, halfvector), 0), shininess) * lightIntensity;
-
-                color = ambient + diffuse + specular;
-            }
-
-            // Cook- Model
-            else
-            {
-                float alpha = 0.4;
-                float cosh = dot(halfvector, VertNormal);
-                float cosi = dot(VertNormal, lightDirection);
-                float coso = dot(VertNormal, eyeVector);
-
-                float D = microfacetNormalDistribution(alpha, cosh);
-                float G1i = shadowingG(alpha, cosi);
-                float G1o = shadowingG(alpha, coso);
-
-                specular = vertColor*lightIntensity*(F*D*G1i*G1o)/(4*cosi*coso);
-                color = ambient + diffuse + specular;
-            }
+        color = specularlight(ambient,lightDirection,eyeVector,VertNormal,vertColor);
         }
+
         rayon.origin = origin;
         rayon.dir = dir;
         rayon.hitpoint = h.hitpoint;
